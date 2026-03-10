@@ -1,0 +1,10 @@
+*.pyc
+__pycache__/
+.venv/
+bios_cache/
+downloads/
+releases/
+build/
+dist/
+*.spec
+*.egg-info/
