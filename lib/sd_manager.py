@@ -158,7 +158,7 @@ def get_drive_partitions(device: str) -> list[dict]:
 def detect_sd_state(mount_point: str) -> str:
     """Determine what is currently on the SD card.
 
-    Returns "crossmix", "stock", "empty", or "unknown".
+    Returns "onion", "crossmix", "stock", "empty", or "unknown".
     """
     if not os.path.isdir(mount_point):
         return "unknown"
@@ -177,44 +177,27 @@ def detect_sd_state(mount_point: str) -> str:
     if not meaningful:
         return "empty"
 
+    if ".tmp_update" in entries:
+        return "onion"
+
     if "System" in entries and "Emus" in entries:
         return "crossmix"
 
-    if "RetroArch" in entries and "System" not in entries:
+    if "miyoo" in entries:
         return "stock"
 
     return "unknown"
 
 
-def get_crossmix_version(mount_point: str) -> str | None:
-    """Read the installed CrossMix version from the SD card.
-
-    Looks for version info in System/ directory.
-    """
-    # CrossMix stores version in System/usr/trimui/crossmix_version.txt
-    # or it can be found from the update script
-    candidates = [
-        os.path.join(mount_point, "System", "usr", "trimui", "crossmix_version.txt"),
-        os.path.join(mount_point, "System", "crossmix_version.txt"),
-    ]
-    for version_file in candidates:
+def get_os_version(mount_point: str, profile: dict) -> str | None:
+    """Read the installed OS version from the SD card using the profile's version paths."""
+    for rel_path in profile.get("version_paths", []):
+        version_file = os.path.join(mount_point, rel_path)
         try:
             with open(version_file) as fh:
                 return fh.read().strip()
         except (FileNotFoundError, OSError):
             continue
-
-    # Try to infer from _Updates directory
-    updates_dir = os.path.join(mount_point, "_Updates")
-    if os.path.isdir(updates_dir):
-        try:
-            entries = sorted(os.listdir(updates_dir), reverse=True)
-            for entry in entries:
-                if "crossmix" in entry.lower():
-                    return entry
-        except OSError:
-            pass
-
     return None
 
 
@@ -225,33 +208,17 @@ def _partition_device_for(device: str) -> str:
     return f"{device}1"
 
 
-def _get_cluster_sectors(size_bytes: int) -> str:
-    """Return FAT32 cluster sectors based on card capacity.
-
-    CrossMix recommendations:
-    - <128GB: 512 allocation unit (sectors=1 since each sector=512B -> use 64 for 32KB clusters)
-    - <256GB: 1024
-    - <512GB: 2048
-    - <1TB: 4096
-    - <2TB: 8192
-    """
-    gb = size_bytes / (1024 ** 3)
-    if gb < 128:
-        return "64"    # 32KB clusters
-    elif gb < 256:
-        return "128"   # 64KB clusters
-    elif gb < 512:
-        return "256"
-    elif gb < 1024:
-        return "512"
-    else:
-        return "1024"
-
-
-def format_sd_card(device: str, label: str = "CROSSMIX") -> tuple[bool, str]:
+def format_sd_card(device: str, label: str = "SDCARD",
+                   cluster_sectors_fn=None) -> tuple[bool, str]:
     """Format device as FAT32 with an MBR partition table.
 
-    Uses label 'CROSSMIX' by default for CrossMix OS.
+    Parameters
+    ----------
+    label : str
+        Volume label (max 11 ASCII characters).
+    cluster_sectors_fn : callable, optional
+        Function that takes size_bytes and returns cluster sectors string.
+        Defaults to "64" if not provided.
     """
     device = _ensure_block_device(device)
     label = label[:11].upper()
@@ -259,7 +226,10 @@ def format_sd_card(device: str, label: str = "CROSSMIX") -> tuple[bool, str]:
     partition_device = _partition_device_for(device)
 
     size_bytes = _card_size_bytes(device)
-    cluster_sectors = _get_cluster_sectors(size_bytes)
+    if cluster_sectors_fn:
+        cluster_sectors = cluster_sectors_fn(size_bytes)
+    else:
+        cluster_sectors = "64"
 
     # Unmount via udisksctl first
     partitions = get_drive_partitions(device)
@@ -387,3 +357,65 @@ def get_free_space(path: str) -> int:
         return st.f_bavail * st.f_frsize
     except OSError:
         return 0
+
+
+def unmount_all_partitions(device: str) -> tuple[bool, str]:
+    """Unmount all mounted partitions on a device."""
+    device = _ensure_block_device(device)
+    partitions = get_drive_partitions(_device_basename(device))
+    failed = []
+    for part in partitions:
+        if part.get("mountpoint"):
+            res = _run(["udisksctl", "unmount", "-b", part["device"]])
+            if res.returncode != 0:
+                res = _privileged_run(["umount", part["device"]])
+                if res.returncode != 0:
+                    failed.append(part["device"])
+    if failed:
+        return False, f"Failed to unmount: {', '.join(failed)}"
+    return True, "All partitions unmounted."
+
+
+def write_image_to_device(
+    img_path: str,
+    device: str,
+    timeout: int = 3600,
+) -> tuple[bool, str]:
+    """Write a raw .img file to a block device using dd.
+
+    Unmounts all partitions first, then writes with dd via pkexec.
+    Returns (success, message).
+    """
+    device = _ensure_block_device(device)
+
+    import tempfile
+    script = f"""#!/bin/sh
+set -e
+
+# Unmount all partitions
+for p in {device}*; do
+    umount "$p" 2>/dev/null || true
+done
+
+# Write image
+dd if={img_path} of={device} bs=4M conv=fsync status=progress 2>&1
+
+sync
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:
+        f.write(script)
+        script_path = f.name
+
+    try:
+        os.chmod(script_path, 0o755)
+        res = _privileged_run([script_path], timeout=timeout)
+        if res.returncode != 0:
+            error = res.stderr.strip() or res.stdout.strip()
+            return False, f"Image write failed: {error}"
+    finally:
+        try:
+            os.unlink(script_path)
+        except OSError:
+            pass
+
+    return True, f"Image written successfully to {device}."

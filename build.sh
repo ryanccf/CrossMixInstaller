@@ -2,7 +2,7 @@
 set -e
 cd "$(dirname "$0")"
 
-echo "=== CrossMix Installer Build ==="
+echo "=== OS Installer Build ==="
 echo
 
 # Build Linux binary locally
@@ -16,7 +16,7 @@ echo "[2/2] Building Windows binary via GitHub Actions..."
 # Make sure we have a remote
 if ! git remote get-url origin &>/dev/null; then
     echo "ERROR: No git remote 'origin' configured."
-    echo "       Run: git remote add origin git@github.com:YOUR_USER/CrossMixInstaller.git"
+    echo "       Run: git remote add origin git@github.com:YOUR_USER/OSInstaller.git"
     exit 1
 fi
 
@@ -82,16 +82,16 @@ if [[ "$confirm" =~ ^[Yy]$ ]]; then
                 echo
                 echo "  CI build succeeded. Downloading Windows binary..."
                 # Download the Windows artifact
-                gh run download "$RUN_ID" --repo "$REPO" --name CrossMixInstaller-Windows --dir /tmp/crossmix-artifacts 2>/dev/null
-                if [ $? -eq 0 ] && ls /tmp/crossmix-artifacts/CrossMixInstaller-* &>/dev/null; then
-                    cp /tmp/crossmix-artifacts/CrossMixInstaller-* releases/
+                gh run download "$RUN_ID" --repo "$REPO" --name OSInstaller-Windows --dir /tmp/crossmix-artifacts 2>/dev/null
+                if [ $? -eq 0 ] && ls /tmp/crossmix-artifacts/OSInstaller-* &>/dev/null; then
+                    cp /tmp/crossmix-artifacts/OSInstaller-* releases/
                     rm -rf /tmp/crossmix-artifacts
                     echo "  Windows binary downloaded to releases/"
                 else
                     echo "  Could not download artifact. Trying release assets..."
                     # Fall back to downloading from the release page
                     sleep 5
-                    gh release download "$NEXT_TAG" --repo "$REPO" --pattern "CrossMixInstaller-*.exe" --dir releases/ 2>/dev/null \
+                    gh release download "$NEXT_TAG" --repo "$REPO" --pattern "OSInstaller-*.exe" --dir releases/ 2>/dev/null \
                         && echo "  Windows binary downloaded to releases/" \
                         || echo "  WARNING: Could not download Windows binary. Check the release page manually."
                 fi

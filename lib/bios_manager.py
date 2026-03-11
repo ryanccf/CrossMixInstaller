@@ -1,8 +1,8 @@
 """
-bios_manager.py - Download, verify, cache, and install BIOS files for CrossMix OS.
+bios_manager.py - Download, verify, cache, and install BIOS files.
 
-Manages BIOS files required by various emulators on the TrimUI Smart Pro.
-Downloads from the Abdess/retroarch_system GitHub repository, caches locally,
+Works with any OS profile's BIOS file list. Downloads from the
+Abdess/retroarch_system GitHub repository, caches locally,
 and installs to the SD card's BIOS/ directory.
 """
 
@@ -15,6 +15,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from lib.os_profiles import SYSTEM_TO_REPO_PATH
+
 logger = logging.getLogger(__name__)
 
 CHUNK_SIZE = 64 * 1024
@@ -24,333 +26,10 @@ _BASE_RAW_URL = (
     "https://raw.githubusercontent.com/Abdess/retroarch_system/libretro/"
 )
 
-_SYSTEM_TO_REPO_PATH = {
-    "PlayStation": "Sony - PlayStation/",
-    "Neo Geo": "Arcade/",
-    "Neo Geo CD": "SNK - NeoGeo CD/",
-    "Sega CD": "Sega - Mega CD - Sega CD/",
-    "TurboGrafx-CD": "NEC - PC Engine - TurboGrafx 16 - SuperGrafx/",
-    "Saturn": "Sega - Saturn/",
-    "GBA": "Nintendo - Game Boy Advance/",
-    "GB": "Nintendo - Gameboy/",
-    "GBC": "Nintendo - Gameboy Color/",
-    "3DO": "3DO Company, The - 3DO/",
-    "Atari 5200": "Atari - 5200/",
-    "Atari 7800": "Atari - 7800/",
-    "Atari 800": "Atari - 400-800/",
-    "Atari ST": "Atari - ST/",
-    "ColecoVision": "Coleco - ColecoVision/",
-    "Channel F": "Fairchild Channel F/",
-    "Intellivision": "Mattel - Intellivision/",
-    "PC-FX": "NEC - PC-FX/",
-    "Odyssey 2": "Magnavox - Odyssey2/",
-}
-
-# ---------------------------------------------------------------------------
-# BIOS file definitions for CrossMix / TrimUI Smart Pro
-# ---------------------------------------------------------------------------
-
-BIOS_FILES = [
-    # --- PlayStation (required) ---
-    {
-        "filename": "scph5501.bin",
-        "system": "PlayStation",
-        "md5": "490f666e1afb15b7362b406ed1cea246",
-        "required": True,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "PS1 BIOS (North America)",
-    },
-    {
-        "filename": "scph1001.bin",
-        "system": "PlayStation",
-        "md5": "924e392ed05558ffdb115408c263dccf",
-        "required": True,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "PS1 BIOS (North America, original)",
-    },
-    {
-        "filename": "scph5500.bin",
-        "system": "PlayStation",
-        "md5": "8dd7d5296a650fac7319bce665a6a53c",
-        "required": True,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "PS1 BIOS (Japan)",
-    },
-    {
-        "filename": "scph5502.bin",
-        "system": "PlayStation",
-        "md5": "32736f17079d0b2b7024407c39bd3050",
-        "required": True,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "PS1 BIOS (Europe)",
-    },
-    {
-        "filename": "scph7001.bin",
-        "system": "PlayStation",
-        "md5": "",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "PS1 BIOS (North America, later model)",
-    },
-    {
-        "filename": "scph101.bin",
-        "system": "PlayStation",
-        "md5": "",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "PS1 BIOS (PSone slim)",
-    },
-    # --- Neo Geo (required) ---
-    {
-        "filename": "neogeo.zip",
-        "system": "Neo Geo",
-        "md5": "",
-        "required": True,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Neo Geo BIOS",
-    },
-    # --- Neo Geo CD (optional) ---
-    {
-        "filename": "neocd_f.rom",
-        "system": "Neo Geo CD",
-        "md5": "",
-        "required": False,
-        "subdir": "neocd",
-        "extra_copies": [],
-        "notes": "Neo Geo CD front loader BIOS",
-    },
-    {
-        "filename": "000-lo.lo",
-        "system": "Neo Geo CD",
-        "md5": "",
-        "required": False,
-        "subdir": "neocd",
-        "extra_copies": [],
-        "notes": "Neo Geo CD load order file",
-    },
-    # --- Sega CD (required) ---
-    {
-        "filename": "bios_CD_U.bin",
-        "system": "Sega CD",
-        "md5": "2efd74e3232ff260e371b99f84024f7f",
-        "required": True,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Sega CD BIOS (North America)",
-    },
-    {
-        "filename": "bios_CD_E.bin",
-        "system": "Sega CD",
-        "md5": "e66fa1dc5820d254611fdcdba0662372",
-        "required": True,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Sega CD BIOS (Europe)",
-    },
-    {
-        "filename": "bios_CD_J.bin",
-        "system": "Sega CD",
-        "md5": "278a9397d192149e84e820ac621a8edd",
-        "required": True,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Sega CD BIOS (Japan)",
-    },
-    # --- TurboGrafx-CD (required) ---
-    {
-        "filename": "syscard3.pce",
-        "system": "TurboGrafx-CD",
-        "md5": "38179df8f4ac870017db21ebcbf53114",
-        "required": True,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "TurboGrafx-CD / PC Engine CD System Card 3",
-    },
-    # --- Sega Saturn (required) ---
-    {
-        "filename": "mpr-17933.bin",
-        "system": "Saturn",
-        "md5": "3240872c70984b6cbfda1586cab68dbe",
-        "required": True,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Sega Saturn BIOS (Europe)",
-    },
-    # --- 3DO (required) ---
-    {
-        "filename": "panafz1.bin",
-        "system": "3DO",
-        "md5": "",
-        "required": True,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Panasonic 3DO FZ-1 BIOS",
-    },
-    {
-        "filename": "panafz10.bin",
-        "system": "3DO",
-        "md5": "",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Panasonic 3DO FZ-10 BIOS",
-    },
-    # --- PC Engine / PC-FX (optional) ---
-    {
-        "filename": "pcfx.rom",
-        "system": "PC-FX",
-        "md5": "",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "NEC PC-FX BIOS",
-    },
-    # --- Atari (optional) ---
-    {
-        "filename": "5200.rom",
-        "system": "Atari 5200",
-        "md5": "",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Atari 5200 BIOS",
-    },
-    {
-        "filename": "7800 BIOS (U).rom",
-        "system": "Atari 7800",
-        "md5": "",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Atari 7800 BIOS (North America)",
-    },
-    {
-        "filename": "ATARIOSA.ROM",
-        "system": "Atari 800",
-        "md5": "",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Atari 800 OS-A BIOS",
-    },
-    {
-        "filename": "ATARIOSB.ROM",
-        "system": "Atari 800",
-        "md5": "",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Atari 800 OS-B BIOS",
-    },
-    {
-        "filename": "ATARIBAS.ROM",
-        "system": "Atari 800",
-        "md5": "",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Atari BASIC cartridge",
-    },
-    # --- ColecoVision (optional) ---
-    {
-        "filename": "colecovision.rom",
-        "system": "ColecoVision",
-        "md5": "",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "ColecoVision BIOS",
-    },
-    # --- Fairchild Channel F (optional) ---
-    {
-        "filename": "sl31253.bin",
-        "system": "Channel F",
-        "md5": "",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Channel F BIOS (SL31253)",
-    },
-    {
-        "filename": "sl31254.bin",
-        "system": "Channel F",
-        "md5": "",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Channel F BIOS (SL31254)",
-    },
-    # --- Intellivision (optional) ---
-    {
-        "filename": "exec.bin",
-        "system": "Intellivision",
-        "md5": "",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Intellivision Executive ROM",
-    },
-    {
-        "filename": "grom.bin",
-        "system": "Intellivision",
-        "md5": "",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Intellivision Graphics ROM",
-    },
-    # --- Odyssey 2 (optional) ---
-    {
-        "filename": "o2rom.bin",
-        "system": "Odyssey 2",
-        "md5": "",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Magnavox Odyssey 2 BIOS",
-    },
-    # --- GBA (optional) ---
-    {
-        "filename": "gba_bios.bin",
-        "system": "GBA",
-        "md5": "a860e8c0b6d573d191e4ec7db1b1e4f6",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Game Boy Advance BIOS (optional, HLE available)",
-    },
-    # --- GB / GBC (optional) ---
-    {
-        "filename": "gb_bios.bin",
-        "system": "GB",
-        "md5": "32fbbd84168d3482956eb3c5051637f5",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Game Boy BIOS (optional)",
-    },
-    {
-        "filename": "gbc_bios.bin",
-        "system": "GBC",
-        "md5": "dbfce9db9deaa2567f6a84fde55f9680",
-        "required": False,
-        "subdir": "",
-        "extra_copies": [],
-        "notes": "Game Boy Color BIOS (optional)",
-    },
-]
-
 
 def _build_download_url(bios_entry: dict) -> str:
     system = bios_entry["system"]
-    repo_path = _SYSTEM_TO_REPO_PATH.get(system, "")
+    repo_path = SYSTEM_TO_REPO_PATH.get(system, "")
     filename = bios_entry["filename"]
     encoded_path = quote(f"{repo_path}{filename}", safe="/")
     return f"{_BASE_RAW_URL}{encoded_path}"
@@ -437,20 +116,20 @@ def download_bios_file(
     return True, f"Downloaded {filename}"
 
 
-def scan_cached_bios(cache_dir: Path) -> dict[str, bool]:
+def scan_cached_bios(cache_dir: Path, bios_files: list[dict]) -> dict[str, bool]:
     """Check which BIOS files exist in the local cache."""
     result = {}
-    for entry in BIOS_FILES:
+    for entry in bios_files:
         path = _cache_path_for(entry, cache_dir)
         result[entry["filename"]] = path.is_file()
     return result
 
 
-def scan_sd_bios(sd_mount: Path) -> dict[str, bool]:
+def scan_sd_bios(sd_mount: Path, bios_files: list[dict], bios_dir: str = "BIOS") -> dict[str, bool]:
     """Check which BIOS files exist on the SD card."""
-    bios_dir = sd_mount / "BIOS"
+    bios_dir = sd_mount / bios_dir
     result = {}
-    for entry in BIOS_FILES:
+    for entry in bios_files:
         subdir = entry.get("subdir", "")
         if subdir:
             path = bios_dir / subdir / entry["filename"]
@@ -462,6 +141,7 @@ def scan_sd_bios(sd_mount: Path) -> dict[str, bool]:
 
 def download_all_bios(
     cache_dir: Path,
+    bios_files: list[dict],
     progress_cb: Optional[Callable[[float, str], None]] = None,
     skip_cached: bool = True,
     required_only: bool = False,
@@ -472,7 +152,7 @@ def download_all_bios(
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    files = [e for e in BIOS_FILES if not required_only or e["required"]]
+    files = [e for e in bios_files if not required_only or e["required"]]
     total = len(files)
     succeeded = []
     failed = []
@@ -510,17 +190,19 @@ def download_all_bios(
 def install_bios_to_sd(
     cache_dir: Path,
     sd_mount: Path,
+    bios_files: list[dict],
     progress_cb: Optional[Callable[[float, str], None]] = None,
     required_only: bool = False,
+    bios_dir: str = "BIOS",
 ) -> tuple[bool, list[str], list[str]]:
     """Copy cached BIOS files to the SD card's BIOS/ directory.
 
     Returns (all_succeeded, succeeded_list, failed_list).
     """
-    bios_dir = sd_mount / "BIOS"
+    bios_dir = sd_mount / bios_dir
     bios_dir.mkdir(parents=True, exist_ok=True)
 
-    files = [e for e in BIOS_FILES if not required_only or e["required"]]
+    files = [e for e in bios_files if not required_only or e["required"]]
     total = len(files)
     succeeded = []
     failed = []

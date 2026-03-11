@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-CrossMix Installer - Linux Desktop Tools for CrossMix OS
-Manages CrossMix OS installation on TrimUI Smart Pro SD cards.
+OS Installer - Install Onion OS or CrossMix OS to SD cards.
+Supports Miyoo Mini/Mini+ (Onion OS) and TrimUI Smart Pro (CrossMix OS).
 """
 
 import gi
@@ -15,22 +15,25 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from lib.os_profiles import OS_PROFILES
 from lib.sd_manager import (
-    list_removable_drives, detect_sd_state, get_crossmix_version,
+    list_removable_drives, detect_sd_state, get_os_version,
     format_sd_card, check_disk, eject_drive, mount_partition,
-    unmount_partition, get_free_space, get_drive_partitions
+    unmount_partition, get_free_space, get_drive_partitions,
+    unmount_all_partitions, write_image_to_device,
 )
-from lib.crossmix_installer import (
-    fetch_releases, download_release, extract_to_sd,
+from lib.os_installer import (
+    fetch_releases, download_release, download_multipart_release,
+    extract_to_sd, decompress_image,
     verify_extraction, get_required_space, get_downloaded_releases
 )
 from lib.bios_manager import (
-    BIOS_FILES, download_all_bios, install_bios_to_sd,
+    download_all_bios, install_bios_to_sd,
     scan_sd_bios, scan_cached_bios,
 )
 
-APP_NAME = "CrossMix Installer"
-APP_VERSION = "0.1.0"
+APP_NAME = "OS Installer"
+APP_VERSION = "0.2.0"
 APP_DIR = Path(__file__).parent.resolve()
 DOWNLOADS_DIR = APP_DIR / "downloads"
 BIOS_CACHE_DIR = APP_DIR / "bios_cache"
@@ -91,13 +94,11 @@ class DriveSelector(Gtk.Dialog):
             text = f"/dev/{drive['name']} - {drive['size']} - {drive.get('model', 'Unknown')}"
             if drive.get('label'):
                 text += f" [{drive['label']}]"
-
             if first_radio is None:
                 radio = Gtk.RadioButton.new_with_label(None, text)
                 first_radio = radio
             else:
                 radio = Gtk.RadioButton.new_with_label_from_widget(first_radio, text)
-
             radio.drive_info = drive
             radio.connect("toggled", self._on_radio_toggled)
             self.radio_box.pack_start(radio, False, False, 0)
@@ -152,20 +153,52 @@ class ProgressDialog(Gtk.Dialog):
         return False
 
 
-class CrossMixInstaller(Gtk.Window):
+class OSInstaller(Gtk.Window):
     """Main application window."""
 
     def __init__(self):
         super().__init__(title=f"{APP_NAME} v{APP_VERSION}")
-        self.set_default_size(520, 380)
+        self.set_default_size(550, 420)
         self.set_resizable(False)
         self.set_position(Gtk.WindowPosition.CENTER)
-
         self.connect("destroy", Gtk.main_quit)
+
+        # Current OS profile
+        self.profile_key = "crossmix"
+        self.profile = OS_PROFILES[self.profile_key]
 
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.add(main_box)
 
+        # OS Selector bar at top
+        os_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        os_bar.set_margin_start(10)
+        os_bar.set_margin_end(10)
+        os_bar.set_margin_top(8)
+        os_bar.set_margin_bottom(4)
+        main_box.pack_start(os_bar, False, False, 0)
+
+        os_label = Gtk.Label()
+        os_label.set_markup("<b>Target OS:</b>")
+        os_bar.pack_start(os_label, False, False, 0)
+
+        self.os_combo = Gtk.ComboBoxText()
+        for key, prof in OS_PROFILES.items():
+            self.os_combo.append(key, prof['name'])
+        self.os_combo.set_active_id(self.profile_key)
+        self.os_combo.connect("changed", self._on_os_changed)
+        os_bar.pack_start(self.os_combo, False, False, 0)
+
+        self.device_label = Gtk.Label()
+        self.device_label.set_markup(f"  <i>{self.profile['device']}</i>")
+        os_bar.pack_start(self.device_label, False, False, 0)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.set_margin_start(5)
+        sep.set_margin_end(5)
+        main_box.pack_start(sep, False, False, 0)
+
+        # Notebook
         self.notebook = Gtk.Notebook()
         self.notebook.set_margin_start(5)
         self.notebook.set_margin_end(5)
@@ -197,7 +230,15 @@ class CrossMixInstaller(Gtk.Window):
 
         self.notebook.connect("switch-page", self._on_tab_changed)
 
-    # -- Tab 1: Install or Update CrossMix --
+    def _on_os_changed(self, combo):
+        self.profile_key = combo.get_active_id()
+        self.profile = OS_PROFILES[self.profile_key]
+        self.device_label.set_markup(f"  <i>{self.profile['device']}</i>")
+        self._update_install_labels()
+        self._update_bios_status()
+        self._update_about_page()
+
+    # -- Tab 1: Install or Update --
 
     def _build_install_tab(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -206,41 +247,70 @@ class CrossMixInstaller(Gtk.Window):
         box.set_margin_top(15)
         box.set_margin_bottom(15)
 
-        frame = Gtk.Frame(label="Install or Update CrossMix OS")
-        frame.set_margin_bottom(10)
-        box.pack_start(frame, True, True, 0)
+        self.install_frame = Gtk.Frame()
+        self.install_frame.set_margin_bottom(10)
+        box.pack_start(self.install_frame, True, True, 0)
 
         inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         inner.set_margin_start(20)
         inner.set_margin_end(20)
         inner.set_margin_top(15)
         inner.set_margin_bottom(15)
-        frame.add(inner)
+        self.install_frame.add(inner)
 
-        desc = Gtk.Label(
-            label="Install CrossMix OS on an SD card for TrimUI Smart Pro.\n"
-                  "Download the latest release from GitHub and extract to SD."
-        )
-        desc.set_halign(Gtk.Align.START)
-        desc.set_line_wrap(True)
-        inner.pack_start(desc, False, False, 0)
+        self.install_desc = Gtk.Label()
+        self.install_desc.set_halign(Gtk.Align.START)
+        self.install_desc.set_line_wrap(True)
+        inner.pack_start(self.install_desc, False, False, 0)
 
         sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
         inner.pack_start(sep, False, False, 5)
 
         self.install_radios = []
 
-        r1 = Gtk.RadioButton.new_with_label(None, "Install / Upgrade / Reinstall CrossMix (without formatting)")
-        r1.action = "install_no_format"
-        self.install_radios.append(r1)
-        inner.pack_start(r1, False, False, 0)
+        self.r1 = Gtk.RadioButton.new_with_label(None, "")
+        self.r1.action = "install_no_format"
+        self.install_radios.append(self.r1)
+        inner.pack_start(self.r1, False, False, 0)
 
-        r2 = Gtk.RadioButton.new_with_label_from_widget(r1, "Format SD card and install CrossMix")
-        r2.action = "format_and_install"
-        self.install_radios.append(r2)
-        inner.pack_start(r2, False, False, 0)
+        self.r2 = Gtk.RadioButton.new_with_label_from_widget(self.r1, "")
+        self.r2.action = "format_and_install"
+        self.install_radios.append(self.r2)
+        inner.pack_start(self.r2, False, False, 0)
 
+        self._update_install_labels()
         self.notebook.append_page(box, Gtk.Label(label="Install / Update"))
+
+    def _update_install_labels(self):
+        name = self.profile["name"]
+        device = self.profile["device"]
+        is_raw = self.profile.get("install_method") == "raw_image"
+
+        if is_raw:
+            self.install_frame.set_label(f"Flash {name}")
+            self.install_desc.set_text(
+                f"Flash {name} disk image to an SD card for {device}.\n"
+                f"WARNING: This will erase ALL data on the selected SD card."
+            )
+            self.r1.set_label(f"Flash {name} to SD card")
+            self.r1.set_active(True)
+            self.r2.set_visible(False)
+        else:
+            self.install_frame.set_label(f"Install or Update {name}")
+            if self.profile_key == "minui":
+                self.install_desc.set_text(
+                    f"Install {name} on an SD card for {device}.\n"
+                    f"Install the BASE zip first (required), then optionally "
+                    f"install EXTRAS on top for more emulators and tools."
+                )
+            else:
+                self.install_desc.set_text(
+                    f"Install {name} on an SD card for {device}.\n"
+                    f"Download the latest release from GitHub and extract to SD."
+                )
+            self.r1.set_label(f"Install / Upgrade / Reinstall {name} (without formatting)")
+            self.r2.set_label(f"Format SD card and install {name}")
+            self.r2.set_visible(True)
 
     # -- Tab 2: BIOS Manager --
 
@@ -297,21 +367,24 @@ class CrossMixInstaller(Gtk.Window):
         GLib.idle_add(self._update_bios_status)
 
     def _update_bios_status(self):
-        cached = scan_cached_bios(BIOS_CACHE_DIR)
-        total_files = len(BIOS_FILES)
+        bios_files = self.profile["bios_files"]
+        cached = scan_cached_bios(BIOS_CACHE_DIR, bios_files)
+        total_files = len(bios_files)
         cached_count = sum(1 for v in cached.values() if v)
-        required_files = [e for e in BIOS_FILES if e["required"]]
+        required_files = [e for e in bios_files if e["required"]]
         required_total = len(required_files)
         required_cached = sum(1 for e in required_files if cached.get(e["filename"], False))
         self.bios_status_label.set_text(
-            f"Cached: {cached_count}/{total_files} files "
+            f"[{self.profile['name']}] Cached: {cached_count}/{total_files} files "
             f"({required_cached}/{required_total} required)"
         )
         return False
 
     def _on_bios_download(self, button):
+        bios_files = self.profile["bios_files"]
         required_only = self.bios_required_only.get_active()
-        progress = ProgressDialog(self, "Downloading BIOS Files")
+        os_name = self.profile["name"]
+        progress = ProgressDialog(self, f"Downloading BIOS Files ({os_name})")
 
         def worker():
             try:
@@ -319,8 +392,8 @@ class CrossMixInstaller(Gtk.Window):
                     GLib.idle_add(progress.set_progress, fraction, text)
 
                 ok, succeeded, failed = download_all_bios(
-                    BIOS_CACHE_DIR, progress_cb=cb,
-                    skip_cached=True, required_only=required_only,
+                    BIOS_CACHE_DIR, bios_files,
+                    progress_cb=cb, skip_cached=True, required_only=required_only,
                 )
 
                 GLib.idle_add(progress.set_progress, 1.0, "Done!")
@@ -344,7 +417,8 @@ class CrossMixInstaller(Gtk.Window):
         thread.start()
 
     def _on_bios_install(self, button):
-        cached = scan_cached_bios(BIOS_CACHE_DIR)
+        bios_files = self.profile["bios_files"]
+        cached = scan_cached_bios(BIOS_CACHE_DIR, bios_files)
         if not any(cached.values()):
             self._show_message(
                 "No BIOS Files",
@@ -353,24 +427,33 @@ class CrossMixInstaller(Gtk.Window):
             )
             return
 
-        device, mount_point = self._select_drive()
+        device, mount_point = self._select_drive_for_bios()
         if not device:
             return
         if not mount_point:
-            self._show_message("Error", "Could not mount SD card.", Gtk.MessageType.ERROR)
+            label_hint = self.profile.get("bios_partition_label", "")
+            hint = f"\nLook for a partition labeled '{label_hint}'." if label_hint else ""
+            self._show_message(
+                "Error",
+                f"Could not mount the BIOS partition.{hint}",
+                Gtk.MessageType.ERROR,
+            )
             return
 
         required_only = self.bios_required_only.get_active()
-        progress = ProgressDialog(self, "Installing BIOS Files")
+        os_name = self.profile["name"]
+        progress = ProgressDialog(self, f"Installing BIOS Files ({os_name})")
 
         def worker():
             try:
                 def cb(fraction, text):
                     GLib.idle_add(progress.set_progress, fraction, text)
 
+                bios_dir_name = self.profile.get("bios_dir", "BIOS")
                 ok, succeeded, failed = install_bios_to_sd(
-                    BIOS_CACHE_DIR, Path(mount_point),
+                    BIOS_CACHE_DIR, Path(mount_point), bios_files,
                     progress_cb=cb, required_only=required_only,
+                    bios_dir=bios_dir_name,
                 )
 
                 GLib.idle_add(progress.set_progress, 1.0, "Done!")
@@ -414,7 +497,7 @@ class CrossMixInstaller(Gtk.Window):
 
         self.sdtools_radios = []
 
-        r1 = Gtk.RadioButton.new_with_label(None, "Format SD card in FAT32 (label: CROSSMIX)")
+        r1 = Gtk.RadioButton.new_with_label(None, "Format SD card in FAT32")
         r1.action = "format_fat32"
         self.sdtools_radios.append(r1)
         inner.pack_start(r1, False, False, 0)
@@ -429,43 +512,144 @@ class CrossMixInstaller(Gtk.Window):
     # -- Tab 4: About --
 
     def _build_about_tab(self):
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         box.set_margin_start(15)
         box.set_margin_end(15)
         box.set_margin_top(15)
         box.set_margin_bottom(15)
+        scrolled.add(box)
 
-        title = Gtk.Label()
-        title.set_markup(f"<b>{APP_NAME}</b> v{APP_VERSION}")
-        title.set_halign(Gtk.Align.START)
-        box.pack_start(title, False, False, 0)
+        # OS name and description
+        self.about_os_title = Gtk.Label()
+        self.about_os_title.set_halign(Gtk.Align.START)
+        box.pack_start(self.about_os_title, False, False, 0)
 
-        desc = Gtk.Label(
-            label="Install and manage CrossMix OS on TrimUI Smart Pro SD cards.\n"
-                  "CrossMix OS by cizia64."
+        self.about_os_desc = Gtk.Label()
+        self.about_os_desc.set_halign(Gtk.Align.START)
+        self.about_os_desc.set_line_wrap(True)
+        self.about_os_desc.set_max_width_chars(65)
+        self.about_os_desc.set_margin_top(6)
+        box.pack_start(self.about_os_desc, False, False, 0)
+
+        # Compatible devices
+        sep1 = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep1.set_margin_top(10)
+        sep1.set_margin_bottom(6)
+        box.pack_start(sep1, False, False, 0)
+
+        devices_header = Gtk.Label()
+        devices_header.set_markup("<b>Compatible Devices</b>")
+        devices_header.set_halign(Gtk.Align.START)
+        box.pack_start(devices_header, False, False, 0)
+
+        self.about_devices = Gtk.Label()
+        self.about_devices.set_halign(Gtk.Align.START)
+        self.about_devices.set_line_wrap(True)
+        self.about_devices.set_max_width_chars(65)
+        self.about_devices.set_margin_top(4)
+        self.about_devices.set_margin_start(10)
+        box.pack_start(self.about_devices, False, False, 0)
+
+        # Installation info
+        sep2 = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep2.set_margin_top(10)
+        sep2.set_margin_bottom(6)
+        box.pack_start(sep2, False, False, 0)
+
+        install_header = Gtk.Label()
+        install_header.set_markup("<b>Installation</b>")
+        install_header.set_halign(Gtk.Align.START)
+        box.pack_start(install_header, False, False, 0)
+
+        self.about_install_method = Gtk.Label()
+        self.about_install_method.set_halign(Gtk.Align.START)
+        self.about_install_method.set_margin_top(4)
+        self.about_install_method.set_margin_start(10)
+        box.pack_start(self.about_install_method, False, False, 0)
+
+        self.about_install_notes = Gtk.Label()
+        self.about_install_notes.set_halign(Gtk.Align.START)
+        self.about_install_notes.set_line_wrap(True)
+        self.about_install_notes.set_max_width_chars(65)
+        self.about_install_notes.set_margin_top(4)
+        self.about_install_notes.set_margin_start(10)
+        box.pack_start(self.about_install_notes, False, False, 0)
+
+        # Links
+        sep3 = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep3.set_margin_top(10)
+        sep3.set_margin_bottom(6)
+        box.pack_start(sep3, False, False, 0)
+
+        links_header = Gtk.Label()
+        links_header.set_markup("<b>Links</b>")
+        links_header.set_halign(Gtk.Align.START)
+        box.pack_start(links_header, False, False, 0)
+
+        self.about_links = Gtk.Label()
+        self.about_links.set_halign(Gtk.Align.START)
+        self.about_links.set_line_wrap(True)
+        self.about_links.set_margin_top(4)
+        self.about_links.set_margin_start(10)
+        box.pack_start(self.about_links, False, False, 0)
+
+        # App credit at bottom
+        app_label = Gtk.Label()
+        app_label.set_markup(
+            f"\n<small>{APP_NAME} v{APP_VERSION}</small>"
         )
-        desc.set_halign(Gtk.Align.START)
-        desc.set_line_wrap(True)
-        box.pack_start(desc, False, False, 0)
+        app_label.set_halign(Gtk.Align.START)
+        app_label.set_margin_top(10)
+        box.pack_start(app_label, False, False, 0)
 
-        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        box.pack_start(sep, False, False, 5)
+        self._update_about_page()
+        self.notebook.append_page(scrolled, Gtk.Label(label="About"))
 
-        links_label = Gtk.Label()
-        links_label.set_markup(
-            '<a href="https://github.com/cizia64/CrossMix-OS">CrossMix OS on GitHub</a>\n'
-            '<a href="https://github.com/cizia64/CrossMix-OS/wiki">CrossMix OS Wiki</a>'
+    def _update_about_page(self):
+        p = self.profile
+
+        self.about_os_title.set_markup(f"<big><b>{p['name']}</b></big>")
+
+        desc = p.get("description", "")
+        source = p.get("description_source", "")
+        if source:
+            self.about_os_desc.set_markup(
+                f"<i>{GLib.markup_escape_text(desc)}</i>\n"
+                f'<small><a href="{GLib.markup_escape_text(source)}">'
+                f'\u2014 {GLib.markup_escape_text(source)}</a></small>'
+            )
+        else:
+            self.about_os_desc.set_text(desc)
+
+        devices = p.get("compatible_devices", [])
+        device_text = "\n".join(f"\u2022 {d}" for d in devices) if devices else "See project documentation."
+        self.about_devices.set_text(device_text)
+
+        method = p.get("install_method", "zip_extract")
+        if method == "raw_image":
+            method_text = "Method: Raw disk image (flashes entire SD card)"
+        else:
+            method_text = "Method: ZIP extraction to FAT32 SD card"
+        bios_dir = p.get("bios_dir", "BIOS")
+        method_text += f"\nBIOS directory: {bios_dir}/"
+        bios_label = p.get("bios_partition_label", "")
+        if bios_label:
+            method_text += f"\nBIOS partition: {bios_label}"
+        self.about_install_method.set_text(method_text)
+
+        self.about_install_notes.set_text(p.get("install_notes", ""))
+
+        self.about_links.set_markup(
+            f'<a href="{p["project_url"]}">{p["name"]} on GitHub</a>\n'
+            f'<a href="{p["wiki_url"]}">{p["name"]} Wiki / Documentation</a>'
         )
-        links_label.set_halign(Gtk.Align.START)
-        links_label.set_line_wrap(True)
-        box.pack_start(links_label, False, False, 0)
-
-        self.notebook.append_page(box, Gtk.Label(label="About"))
 
     # -- Event Handlers --
 
     def _on_tab_changed(self, notebook, page, page_num):
-        # Hide OK button on BIOS tab (has its own buttons) and About tab
         self.ok_button.set_visible(page_num not in (1, 3))
 
     def _on_ok_clicked(self, button):
@@ -487,8 +671,7 @@ class CrossMixInstaller(Gtk.Window):
         device = f"/dev/{drive['name']}"
         success, msg = eject_drive(device)
         self._show_message(
-            "Eject SD Card",
-            msg,
+            "Eject SD Card", msg,
             Gtk.MessageType.INFO if success else Gtk.MessageType.ERROR
         )
 
@@ -501,7 +684,6 @@ class CrossMixInstaller(Gtk.Window):
         return None
 
     def _select_drive(self):
-        """Show drive selector and return (device, mount_point) or (None, None)."""
         dialog = DriveSelector(self)
         response = dialog.run()
         drive = dialog.selected_drive
@@ -520,7 +702,47 @@ class CrossMixInstaller(Gtk.Window):
             return device, mount_point
         return device, None
 
+    def _select_drive_for_bios(self):
+        """Select a drive and mount the appropriate partition for BIOS install.
+
+        If the profile has bios_partition_label, looks for that partition.
+        Otherwise falls back to the first partition.
+        """
+        dialog = DriveSelector(self)
+        response = dialog.run()
+        drive = dialog.selected_drive
+        dialog.destroy()
+
+        if response != Gtk.ResponseType.OK or not drive:
+            return None, None
+
+        device = f"/dev/{drive['name']}"
+        partitions = get_drive_partitions(drive['name'])
+
+        # If profile specifies a partition label for BIOS, find it
+        bios_label = self.profile.get("bios_partition_label")
+        if bios_label and partitions:
+            for part in partitions:
+                if part.get("label") == bios_label:
+                    mount_point = part.get("mountpoint")
+                    if not mount_point:
+                        mount_point = mount_partition(part["device"])
+                    return device, mount_point
+
+        # Fall back to first partition
+        if partitions:
+            part_dev = f"/dev/{partitions[0]['name']}"
+            mount_point = partitions[0].get('mountpoint')
+            if not mount_point:
+                mount_point = mount_partition(part_dev)
+            return device, mount_point
+
+        return device, None
+
     def _handle_install_action(self):
+        if self.profile.get("install_method") == "raw_image":
+            self._do_raw_install()
+            return
         action = self._get_selected_radio(self.install_radios)
         if action == "install_no_format":
             self._do_install(format_first=False)
@@ -528,6 +750,12 @@ class CrossMixInstaller(Gtk.Window):
             self._do_install(format_first=True)
 
     def _do_install(self, format_first=False):
+        profile = self.profile
+        os_name = profile["name"]
+        device_name = profile["device"]
+        sd_label = profile["sd_label"]
+        cluster_fn = profile["cluster_sectors"]
+
         device, mount_point = self._select_drive()
         if not device:
             return
@@ -535,13 +763,13 @@ class CrossMixInstaller(Gtk.Window):
         if format_first:
             confirm = self._confirm(
                 "Format SD Card",
-                f"This will ERASE ALL DATA on {device}.\nAre you sure you want to format and install CrossMix?"
+                f"This will ERASE ALL DATA on {device}.\n"
+                f"Are you sure you want to format and install {os_name}?"
             )
             if not confirm:
                 return
 
-        # Show release picker
-        release_dialog = ReleasePicker(self)
+        release_dialog = ReleasePicker(self, profile)
         response = release_dialog.run()
         release = release_dialog.selected_release
         release_dialog.destroy()
@@ -553,9 +781,11 @@ class CrossMixInstaller(Gtk.Window):
             try:
                 if format_first:
                     GLib.idle_add(progress.set_progress, 0.05, "Formatting SD card...")
-                    success, msg = format_sd_card(device)
+                    success, msg = format_sd_card(device, label=sd_label,
+                                                  cluster_sectors_fn=cluster_fn)
                     if not success:
-                        GLib.idle_add(self._show_error_and_close_progress, progress, f"Format failed: {msg}")
+                        GLib.idle_add(self._show_error_and_close_progress, progress,
+                                      f"Format failed: {msg}")
                         return
                     import time
                     GLib.idle_add(progress.set_progress, 0.08, "Waiting for drive to settle...")
@@ -573,52 +803,158 @@ class CrossMixInstaller(Gtk.Window):
                         time.sleep(2)
 
                 if not mount_point:
-                    GLib.idle_add(self._show_error_and_close_progress, progress, "Could not mount SD card.")
+                    GLib.idle_add(self._show_error_and_close_progress, progress,
+                                  "Could not mount SD card.")
                     return
 
-                # Download if needed
                 zip_path = None
                 if release.get('local_path'):
                     zip_path = release['local_path']
                 else:
-                    GLib.idle_add(progress.set_progress, 0.1, "Downloading CrossMix OS...")
+                    GLib.idle_add(progress.set_progress, 0.1, f"Downloading {os_name}...")
                     def dl_progress(downloaded, total):
                         if total > 0:
                             frac = 0.1 + 0.5 * (downloaded / total)
                             size_mb = downloaded / (1024 * 1024)
                             total_mb = total / (1024 * 1024)
-                            GLib.idle_add(progress.set_progress, frac, f"Downloading: {size_mb:.1f} / {total_mb:.1f} MB")
+                            GLib.idle_add(progress.set_progress, frac,
+                                          f"Downloading: {size_mb:.1f} / {total_mb:.1f} MB")
                     zip_path = download_release(release['url'], str(DOWNLOADS_DIR), dl_progress)
 
-                # Extract
-                GLib.idle_add(progress.set_progress, 0.6, "Extracting CrossMix OS to SD card...")
+                GLib.idle_add(progress.set_progress, 0.6, f"Extracting {os_name} to SD card...")
                 def ext_progress(current_file, idx, total):
                     frac = 0.6 + 0.35 * (idx / max(total, 1))
                     GLib.idle_add(progress.set_progress, frac, f"Extracting: {current_file}")
 
                 success, msg = extract_to_sd(zip_path, mount_point, ext_progress)
                 if not success:
-                    GLib.idle_add(self._show_error_and_close_progress, progress, f"Extract failed: {msg}")
+                    GLib.idle_add(self._show_error_and_close_progress, progress,
+                                  f"Extract failed: {msg}")
                     return
 
-                # Verify
                 GLib.idle_add(progress.set_progress, 0.97, "Verifying installation...")
-                success, missing = verify_extraction(mount_point)
+                success, missing = verify_extraction(mount_point, profile)
 
                 GLib.idle_add(progress.set_progress, 1.0, "Done!")
                 if success:
                     GLib.idle_add(self._show_success_and_close_progress, progress,
-                                  "CrossMix OS installed successfully!\n\n"
-                                  "You can now eject the SD card and insert it into your TrimUI Smart Pro.\n"
-                                  "The first boot may take a bit longer as CrossMix sets up.")
+                                  f"{os_name} installed successfully!\n\n"
+                                  f"You can now eject the SD card and insert it into your {device_name}.")
                 else:
                     GLib.idle_add(self._show_error_and_close_progress, progress,
-                                  f"Installation completed but some directories are missing:\n{', '.join(missing)}")
+                                  f"Installation completed but some directories are missing:\n"
+                                  f"{', '.join(missing)}")
 
             except Exception as e:
                 GLib.idle_add(self._show_error_and_close_progress, progress, str(e))
 
-        progress = ProgressDialog(self, "Installing CrossMix OS")
+        progress = ProgressDialog(self, f"Installing {os_name}")
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+    # -- Raw Image Install --
+
+    def _do_raw_install(self):
+        profile = self.profile
+        os_name = profile["name"]
+        device_name = profile["device"]
+
+        dialog = DriveSelector(self)
+        response = dialog.run()
+        drive = dialog.selected_drive
+        dialog.destroy()
+
+        if response != Gtk.ResponseType.OK or not drive:
+            return
+
+        device = f"/dev/{drive['name']}"
+        confirm = self._confirm(
+            f"Flash {os_name}",
+            f"This will ERASE ALL DATA on {device} ({drive['size']}).\n"
+            f"A raw disk image will be written to the entire device.\n\n"
+            f"Are you sure you want to continue?"
+        )
+        if not confirm:
+            return
+
+        release_dialog = ReleasePicker(self, profile)
+        response = release_dialog.run()
+        release = release_dialog.selected_release
+        release_dialog.destroy()
+
+        if response != Gtk.ResponseType.OK or not release:
+            return
+
+        def worker():
+            try:
+                archive_path = None
+                companion_urls = release.get('companion_urls', [])
+
+                if release.get('local_path'):
+                    archive_path = Path(release['local_path'])
+                elif companion_urls:
+                    # Multi-part download
+                    all_urls = [release['url']] + companion_urls
+                    GLib.idle_add(progress.set_progress, 0.0,
+                                  f"Downloading {os_name} ({len(all_urls)} parts)...")
+
+                    def dl_progress(downloaded, total):
+                        if total > 0:
+                            frac = 0.5 * (downloaded / total)
+                            size_mb = downloaded / (1024 * 1024)
+                            total_mb = total / (1024 * 1024)
+                            GLib.idle_add(progress.set_progress, frac,
+                                          f"Downloading: {size_mb:.0f} / {total_mb:.0f} MB")
+
+                    archive_path = download_multipart_release(
+                        all_urls, str(DOWNLOADS_DIR), dl_progress)
+                else:
+                    GLib.idle_add(progress.set_progress, 0.0,
+                                  f"Downloading {os_name}...")
+
+                    def dl_progress(downloaded, total):
+                        if total > 0:
+                            frac = 0.5 * (downloaded / total)
+                            size_mb = downloaded / (1024 * 1024)
+                            total_mb = total / (1024 * 1024)
+                            GLib.idle_add(progress.set_progress, frac,
+                                          f"Downloading: {size_mb:.0f} / {total_mb:.0f} MB")
+
+                    archive_path = download_release(
+                        release['url'], str(DOWNLOADS_DIR), dl_progress)
+
+                # Decompress
+                GLib.idle_add(progress.set_progress, 0.5,
+                              "Decompressing image (this may take a while)...")
+                img_path = decompress_image(archive_path, DOWNLOADS_DIR)
+
+                # Unmount and write
+                GLib.idle_add(progress.set_progress, 0.7,
+                              f"Writing image to {device}...")
+                unmount_all_partitions(device)
+                success, msg = write_image_to_device(str(img_path), device)
+
+                # Clean up decompressed image (keep the archive)
+                try:
+                    img_path.unlink()
+                except OSError:
+                    pass
+
+                GLib.idle_add(progress.set_progress, 1.0, "Done!")
+                if success:
+                    GLib.idle_add(
+                        self._show_success_and_close_progress, progress,
+                        f"{os_name} flashed successfully to {device}!\n\n"
+                        f"Insert the SD card into your {device_name} and boot.\n"
+                        f"First boot will take a few minutes to set up.")
+                else:
+                    GLib.idle_add(
+                        self._show_error_and_close_progress, progress, msg)
+
+            except Exception as e:
+                GLib.idle_add(self._show_error_and_close_progress, progress, str(e))
+
+        progress = ProgressDialog(self, f"Flashing {os_name}")
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
 
@@ -641,9 +977,12 @@ class CrossMixInstaller(Gtk.Window):
             return
 
         device = f"/dev/{drive['name']}"
+        sd_label = self.profile["sd_label"]
+        cluster_fn = self.profile["cluster_sectors"]
         confirm = self._confirm(
             "Format SD Card",
-            f"This will ERASE ALL DATA on {device} ({drive['size']}).\n\nAre you sure?"
+            f"This will ERASE ALL DATA on {device} ({drive['size']}).\n"
+            f"Label: {sd_label}\n\nAre you sure?"
         )
         if not confirm:
             return
@@ -652,7 +991,8 @@ class CrossMixInstaller(Gtk.Window):
 
         def worker():
             GLib.idle_add(progress.set_progress, 0.2, f"Formatting {device}...")
-            success, msg = format_sd_card(device)
+            success, msg = format_sd_card(device, label=sd_label,
+                                          cluster_sectors_fn=cluster_fn)
             GLib.idle_add(progress.set_progress, 1.0, "Done!")
             if success:
                 GLib.idle_add(self._show_success_and_close_progress, progress, msg)
@@ -674,7 +1014,8 @@ class CrossMixInstaller(Gtk.Window):
         device = f"/dev/{drive['name']}"
         partitions = get_drive_partitions(drive['name'])
         if not partitions:
-            self._show_message("Error", "No partitions found on this drive.", Gtk.MessageType.ERROR)
+            self._show_message("Error", "No partitions found on this drive.",
+                               Gtk.MessageType.ERROR)
             return
 
         part_dev = f"/dev/{partitions[0]['name']}"
@@ -685,11 +1026,8 @@ class CrossMixInstaller(Gtk.Window):
 
     def _show_message(self, title, message, msg_type=Gtk.MessageType.INFO):
         dialog = Gtk.MessageDialog(
-            transient_for=self,
-            modal=True,
-            message_type=msg_type,
-            buttons=Gtk.ButtonsType.OK,
-            text=title,
+            transient_for=self, modal=True,
+            message_type=msg_type, buttons=Gtk.ButtonsType.OK, text=title,
         )
         dialog.format_secondary_text(message)
         dialog.run()
@@ -697,11 +1035,9 @@ class CrossMixInstaller(Gtk.Window):
 
     def _confirm(self, title, message):
         dialog = Gtk.MessageDialog(
-            transient_for=self,
-            modal=True,
+            transient_for=self, modal=True,
             message_type=Gtk.MessageType.WARNING,
-            buttons=Gtk.ButtonsType.YES_NO,
-            text=title,
+            buttons=Gtk.ButtonsType.YES_NO, text=title,
         )
         dialog.format_secondary_text(message)
         response = dialog.run()
@@ -720,11 +1056,12 @@ class CrossMixInstaller(Gtk.Window):
 
 
 class ReleasePicker(Gtk.Dialog):
-    """Dialog to pick a CrossMix OS release to download/use."""
+    """Dialog to pick an OS release to download/use."""
 
-    def __init__(self, parent):
+    def __init__(self, parent, profile):
+        os_name = profile["name"]
         super().__init__(
-            title="Select CrossMix OS Release",
+            title=f"Select {os_name} Release",
             transient_for=parent,
             modal=True,
         )
@@ -734,6 +1071,7 @@ class ReleasePicker(Gtk.Dialog):
             Gtk.STOCK_OK, Gtk.ResponseType.OK,
         )
         self.selected_release = None
+        self.profile = profile
 
         content = self.get_content_area()
         content.set_spacing(10)
@@ -742,7 +1080,6 @@ class ReleasePicker(Gtk.Dialog):
         content.set_margin_top(15)
         content.set_margin_bottom(15)
 
-        # Already downloaded section
         downloaded = get_downloaded_releases(str(DOWNLOADS_DIR))
         if downloaded:
             local_frame = Gtk.Frame(label="Already Downloaded")
@@ -769,7 +1106,6 @@ class ReleasePicker(Gtk.Dialog):
         else:
             self.first_radio = None
 
-        # Online releases section
         online_frame = Gtk.Frame(label="Download from GitHub")
         online_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         online_box.set_margin_start(10)
@@ -779,7 +1115,7 @@ class ReleasePicker(Gtk.Dialog):
         online_frame.add(online_box)
         content.pack_start(online_frame, True, True, 0)
 
-        loading_label = Gtk.Label(label="Fetching releases from GitHub...")
+        loading_label = Gtk.Label(label=f"Fetching {os_name} releases from GitHub...")
         online_box.pack_start(loading_label, False, False, 0)
 
         self.online_box = online_box
@@ -792,7 +1128,7 @@ class ReleasePicker(Gtk.Dialog):
 
     def _fetch_releases(self):
         try:
-            release_data = fetch_releases()
+            release_data = fetch_releases(self.profile)
             releases = release_data.get('stable', []) + release_data.get('beta', [])
             GLib.idle_add(self._populate_releases, releases)
         except Exception as e:
@@ -817,7 +1153,11 @@ class ReleasePicker(Gtk.Dialog):
             else:
                 radio = Gtk.RadioButton.new_with_label_from_widget(self.first_radio, text)
 
-            radio.release_info = {'url': rel['browser_download_url'], 'name': rel['name']}
+            radio.release_info = {
+                'url': rel['browser_download_url'],
+                'name': rel['name'],
+                'companion_urls': rel.get('companion_urls', []),
+            }
             radio.connect("toggled", self._on_release_toggled)
             self.online_box.pack_start(radio, False, False, 0)
             radio.show()
@@ -845,6 +1185,8 @@ def check_dependencies():
         "eject":     "eject",
         "udevadm":   "udev",
         "lsblk":     "util-linux",
+        "7z":        "p7zip-full",
+        "xz":        "xz-utils",
     }
 
     missing_pkgs = set()
@@ -885,7 +1227,7 @@ def main():
         Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
     )
 
-    win = CrossMixInstaller()
+    win = OSInstaller()
     win.show_all()
     Gtk.main()
 

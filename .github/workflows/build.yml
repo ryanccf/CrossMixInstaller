@@ -38,8 +38,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CrossMixInstaller-Linux
-          path: releases/CrossMixInstaller-*
+          name: OSInstaller-Linux
+          path: releases/OSInstaller-*
 
   build-windows:
     runs-on: windows-latest
@@ -66,8 +66,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CrossMixInstaller-Windows
-          path: releases/CrossMixInstaller-*
+          name: OSInstaller-Windows
+          path: releases/OSInstaller-*
 
   release:
     needs: [build-linux, build-windows]

@@ -56,9 +56,9 @@ def get_output_name():
         machine = "arm64"
 
     if system == "windows":
-        return f"CrossMixInstaller-{machine}.exe"
+        return f"OSInstaller-{machine}.exe"
     else:
-        return f"CrossMixInstaller-{machine}"
+        return f"OSInstaller-{machine}"
 
 
 def build():
