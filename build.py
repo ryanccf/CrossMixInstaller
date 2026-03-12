@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build script for CrossMixInstaller.
+Build script for SBCOSInstaller.
 Creates a standalone binary using PyInstaller for the current platform.
 Output goes to releases/.
 
@@ -56,9 +56,9 @@ def get_output_name():
         machine = "arm64"
 
     if system == "windows":
-        return f"OSInstaller-{machine}.exe"
+        return f"SBCOSInstaller-{machine}.exe"
     else:
-        return f"OSInstaller-{machine}"
+        return f"SBCOSInstaller-{machine}"
 
 
 def build():
@@ -89,10 +89,16 @@ def build():
         "gi",
         "gi.repository.Gtk",
         "gi.repository.Gdk",
+        "gi.repository.GdkPixbuf",
         "gi.repository.GLib",
         "gi.repository.Pango",
     ]:
         cmd += ["--hidden-import", module]
+
+    # Use icon for the binary (Windows .ico / Linux embedded)
+    icon_file = ROOT / "icon.png"
+    if icon_file.exists():
+        cmd += ["--icon", str(icon_file)]
 
     cmd.append("main.py")
 

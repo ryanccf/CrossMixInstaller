@@ -6,7 +6,7 @@ Supports multiple OSes and devices via pluggable profiles.
 
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk, GLib, Pango
+from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, Pango
 
 import os
 import sys
@@ -32,7 +32,7 @@ from lib.bios_manager import (
     scan_sd_bios, scan_cached_bios,
 )
 
-APP_NAME = "OS Installer"
+APP_NAME = "SBCOSInstaller"
 APP_VERSION = "0.2.0"
 APP_DIR = Path(__file__).parent.resolve()
 DOWNLOADS_DIR = APP_DIR / "downloads"
@@ -40,6 +40,9 @@ BIOS_CACHE_DIR = APP_DIR / "bios_cache"
 
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 BIOS_CACHE_DIR.mkdir(exist_ok=True)
+
+# PyInstaller puts bundled data in sys._MEIPASS; fall back to APP_DIR for dev.
+RESOURCES_DIR = Path(getattr(sys, '_MEIPASS', APP_DIR)) / "resources"
 
 
 class DriveSelector(Gtk.Dialog):
@@ -162,6 +165,10 @@ class OSInstaller(Gtk.Window):
         self.set_resizable(False)
         self.set_position(Gtk.WindowPosition.CENTER)
         self.connect("destroy", Gtk.main_quit)
+
+        icon_path = RESOURCES_DIR / "icon_48.png"
+        if icon_path.exists():
+            self.set_icon_from_file(str(icon_path))
 
         # Current OS profile
         self.profile_key = "crossmix"
@@ -521,6 +528,13 @@ class OSInstaller(Gtk.Window):
         box.set_margin_top(15)
         box.set_margin_bottom(15)
         scrolled.add(box)
+
+        # App logo
+        logo_path = RESOURCES_DIR / "icon_128.png"
+        if logo_path.exists():
+            logo = Gtk.Image.new_from_file(str(logo_path))
+            logo.set_margin_bottom(10)
+            box.pack_start(logo, False, False, 0)
 
         # OS name and description
         self.about_os_title = Gtk.Label()
@@ -1227,8 +1241,45 @@ def main():
         Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
     )
 
+    # Splash screen
+    splash = None
+    splash_path = RESOURCES_DIR / "icon_256.png"
+    if splash_path.exists():
+        splash = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
+        splash.set_decorated(False)
+        splash.set_position(Gtk.WindowPosition.CENTER)
+        splash.set_resizable(False)
+        splash.set_keep_above(True)
+
+        splash_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        splash_box.set_margin_start(20)
+        splash_box.set_margin_end(20)
+        splash_box.set_margin_top(20)
+        splash_box.set_margin_bottom(20)
+        splash.add(splash_box)
+
+        splash_img = Gtk.Image.new_from_file(str(splash_path))
+        splash_box.pack_start(splash_img, False, False, 0)
+
+        splash_label = Gtk.Label()
+        splash_label.set_markup(
+            f"<big><b>{APP_NAME}</b></big>\n"
+            f"<small>v{APP_VERSION} — Loading...</small>"
+        )
+        splash_label.set_justify(Gtk.Justification.CENTER)
+        splash_box.pack_start(splash_label, False, False, 0)
+
+        splash.show_all()
+        # Process events so splash renders before building the main window
+        while Gtk.events_pending():
+            Gtk.main_iteration_do(False)
+
     win = OSInstaller()
     win.show_all()
+
+    if splash:
+        splash.destroy()
+
     Gtk.main()
 
 

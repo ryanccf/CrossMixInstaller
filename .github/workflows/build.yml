@@ -38,8 +38,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OSInstaller-Linux
-          path: releases/OSInstaller-*
+          name: SBCOSInstaller-Linux
+          path: releases/SBCOSInstaller-*
 
   build-windows:
     runs-on: windows-latest
@@ -66,8 +66,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OSInstaller-Windows
-          path: releases/OSInstaller-*
+          name: SBCOSInstaller-Windows
+          path: releases/SBCOSInstaller-*
 
   release:
     needs: [build-linux, build-windows]

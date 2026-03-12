@@ -1,4 +1,4 @@
-"""Shared fixtures for CrossMixInstaller tests."""
+"""Shared fixtures for SBCOSInstaller tests."""
 
 import pytest
 from pathlib import Path
