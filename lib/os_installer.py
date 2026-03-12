@@ -2,7 +2,7 @@
 os_installer.py - Download and install OS releases.
 
 Generic installer that works with any OS profile defined in os_profiles.py.
-Supports both zip-extract (Onion, CrossMix, MinUI) and raw-image (dArkOS) installs.
+Supports both zip-extract and raw-image install methods.
 """
 
 import json
@@ -19,7 +19,7 @@ from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
 
-NETWORK_TIMEOUT = 30
+NETWORK_TIMEOUT = 60
 CHUNK_SIZE = 64 * 1024
 _GITHUB_HEADERS = {"Accept": "application/vnd.github+json"}
 
@@ -149,10 +149,13 @@ def download_release(
                         progress_callback(bytes_downloaded, total_bytes)
 
     except HTTPError as exc:
+        dest_path.unlink(missing_ok=True)
         raise ConnectionError(f"Download failed with HTTP {exc.code}: {exc.reason}") from exc
     except URLError as exc:
+        dest_path.unlink(missing_ok=True)
         raise ConnectionError(f"Unable to reach {url}: {exc.reason}") from exc
     except TimeoutError as exc:
+        dest_path.unlink(missing_ok=True)
         raise ConnectionError(f"Download timed out after {NETWORK_TIMEOUT}s") from exc
 
     logger.info("Downloaded %s (%d bytes)", dest_path, bytes_downloaded)
@@ -165,6 +168,9 @@ def download_multipart_release(
     progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> Path:
     """Download all parts of a multi-part archive. Returns path to the .001 file."""
+    if not urls:
+        raise ValueError("No URLs provided for multipart download")
+
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
 

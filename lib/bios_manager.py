@@ -3,7 +3,7 @@ bios_manager.py - Download, verify, cache, and install BIOS files.
 
 Works with any OS profile's BIOS file list. Downloads from the
 Abdess/retroarch_system GitHub repository, caches locally,
-and installs to the SD card's BIOS/ directory.
+and installs to the SD card's BIOS directory.
 """
 
 import hashlib
@@ -127,14 +127,14 @@ def scan_cached_bios(cache_dir: Path, bios_files: list[dict]) -> dict[str, bool]
 
 def scan_sd_bios(sd_mount: Path, bios_files: list[dict], bios_dir: str = "BIOS") -> dict[str, bool]:
     """Check which BIOS files exist on the SD card."""
-    bios_dir = sd_mount / bios_dir
+    bios_path = sd_mount / bios_dir
     result = {}
     for entry in bios_files:
         subdir = entry.get("subdir", "")
         if subdir:
-            path = bios_dir / subdir / entry["filename"]
+            path = bios_path / subdir / entry["filename"]
         else:
-            path = bios_dir / entry["filename"]
+            path = bios_path / entry["filename"]
         result[entry["filename"]] = path.is_file()
     return result
 
@@ -195,12 +195,12 @@ def install_bios_to_sd(
     required_only: bool = False,
     bios_dir: str = "BIOS",
 ) -> tuple[bool, list[str], list[str]]:
-    """Copy cached BIOS files to the SD card's BIOS/ directory.
+    """Copy cached BIOS files to the SD card's BIOS directory.
 
     Returns (all_succeeded, succeeded_list, failed_list).
     """
-    bios_dir = sd_mount / bios_dir
-    bios_dir.mkdir(parents=True, exist_ok=True)
+    bios_path = sd_mount / bios_dir
+    bios_path.mkdir(parents=True, exist_ok=True)
 
     files = [e for e in bios_files if not required_only or e["required"]]
     total = len(files)
@@ -223,11 +223,11 @@ def install_bios_to_sd(
         try:
             subdir = entry.get("subdir", "")
             if subdir:
-                dest_dir = bios_dir / subdir
+                dest_dir = bios_path / subdir
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 dest = dest_dir / filename
             else:
-                dest = bios_dir / filename
+                dest = bios_path / filename
 
             shutil.copy2(src, dest)
             logger.info("Installed %s -> %s", filename, dest)

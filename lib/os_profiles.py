@@ -1,5 +1,5 @@
 """
-os_profiles.py - OS profile definitions for Onion OS and CrossMix OS.
+os_profiles.py - OS profile definitions for supported operating systems.
 
 Each profile contains all the OS-specific configuration: GitHub repo,
 expected directories, SD card label, BIOS file lists, and detection logic.
@@ -29,6 +29,9 @@ SYSTEM_TO_REPO_PATH = {
     "Intellivision": "Mattel - Intellivision/",
     "PC-FX": "NEC - PC-FX/",
     "Odyssey 2": "Magnavox - Odyssey2/",
+    "FDS": "Nintendo - Family Computer Disk System/",
+    "Atari Lynx": "Atari - Lynx/",
+    "Pokemon Mini": "Nintendo - Pokemon Mini/",
 }
 
 # ---------------------------------------------------------------------------
@@ -162,6 +165,62 @@ MINUI_BIOS_FILES = [
     {"filename": "gbc_bios.bin", "system": "GBC", "md5": "dbfce9db9deaa2567f6a84fde55f9680", "required": False, "subdir": "", "extra_copies": [], "notes": "Game Boy Color BIOS (optional)"},
 ]
 
+ROCKNIX_BIOS_FILES = [
+    # --- PlayStation (required) ---
+    {"filename": "scph5500.bin", "system": "PlayStation", "md5": "8dd7d5296a650fac7319bce665a6a53c", "required": True, "subdir": "", "extra_copies": [], "notes": "PS1 BIOS (Japan)"},
+    {"filename": "scph5501.bin", "system": "PlayStation", "md5": "490f666e1afb15b7362b406ed1cea246", "required": True, "subdir": "", "extra_copies": [], "notes": "PS1 BIOS (North America)"},
+    {"filename": "scph5502.bin", "system": "PlayStation", "md5": "32736f17079d0b2b7024407c39bd3050", "required": True, "subdir": "", "extra_copies": [], "notes": "PS1 BIOS (Europe)"},
+    # --- Neo Geo (required) ---
+    {"filename": "neogeo.zip", "system": "Neo Geo", "md5": "", "required": True, "subdir": "", "extra_copies": [], "notes": "Neo Geo BIOS"},
+    # --- Sega CD (required) ---
+    {"filename": "bios_CD_U.bin", "system": "Sega CD", "md5": "2efd74e3232ff260e371b99f84024f7f", "required": True, "subdir": "", "extra_copies": [], "notes": "Sega CD BIOS (North America)"},
+    {"filename": "bios_CD_E.bin", "system": "Sega CD", "md5": "e66fa1dc5820d254611fdcdba0662372", "required": True, "subdir": "", "extra_copies": [], "notes": "Sega CD BIOS (Europe)"},
+    {"filename": "bios_CD_J.bin", "system": "Sega CD", "md5": "278a9397d192149e84e820ac621a8edd", "required": True, "subdir": "", "extra_copies": [], "notes": "Sega CD BIOS (Japan)"},
+    # --- TurboGrafx-CD (required) ---
+    {"filename": "syscard3.pce", "system": "TurboGrafx-CD", "md5": "38179df8f4ac870017db21ebcbf53114", "required": True, "subdir": "", "extra_copies": [], "notes": "TurboGrafx-CD System Card 3"},
+    # --- Sega Saturn (required) ---
+    {"filename": "mpr-17933.bin", "system": "Saturn", "md5": "3240872c70984b6cbfda1586cab68dbe", "required": True, "subdir": "", "extra_copies": [], "notes": "Sega Saturn BIOS (Europe)"},
+    # --- Dreamcast (optional, subdir dc/) ---
+    {"filename": "dc_boot.bin", "system": "Dreamcast", "md5": "", "required": False, "subdir": "dc", "extra_copies": [], "notes": "Dreamcast BIOS"},
+    {"filename": "dc_flash.bin", "system": "Dreamcast", "md5": "", "required": False, "subdir": "dc", "extra_copies": [], "notes": "Dreamcast Flash ROM"},
+    # --- Neo Geo CD (optional) ---
+    {"filename": "neocdz.zip", "system": "Neo Geo CD", "md5": "", "required": False, "subdir": "neocd", "extra_copies": [], "notes": "Neo Geo CDZ BIOS"},
+    # --- GBA (optional) ---
+    {"filename": "gba_bios.bin", "system": "GBA", "md5": "a860e8c0b6d573d191e4ec7db1b1e4f6", "required": False, "subdir": "", "extra_copies": [], "notes": "Game Boy Advance BIOS (optional, HLE available)"},
+    # --- GB / GBC (optional) ---
+    {"filename": "gb_bios.bin", "system": "GB", "md5": "32fbbd84168d3482956eb3c5051637f5", "required": False, "subdir": "", "extra_copies": [], "notes": "Game Boy BIOS (optional)"},
+    {"filename": "gbc_bios.bin", "system": "GBC", "md5": "dbfce9db9deaa2567f6a84fde55f9680", "required": False, "subdir": "", "extra_copies": [], "notes": "Game Boy Color BIOS (optional)"},
+]
+
+KORIKI_BIOS_FILES = [
+    # --- PlayStation (required) ---
+    {"filename": "scph1001.bin", "system": "PlayStation", "md5": "924e392ed05558ffdb115408c263dccf", "required": True, "subdir": "", "extra_copies": [], "notes": "PS1 BIOS (North America)"},
+    {"filename": "scph5500.bin", "system": "PlayStation", "md5": "8dd7d5296a650fac7319bce665a6a53c", "required": True, "subdir": "", "extra_copies": [], "notes": "PS1 BIOS (Japan)"},
+    {"filename": "scph5501.bin", "system": "PlayStation", "md5": "490f666e1afb15b7362b406ed1cea246", "required": True, "subdir": "", "extra_copies": [], "notes": "PS1 BIOS (North America)"},
+    {"filename": "scph5502.bin", "system": "PlayStation", "md5": "32736f17079d0b2b7024407c39bd3050", "required": True, "subdir": "", "extra_copies": [], "notes": "PS1 BIOS (Europe)"},
+    # --- Neo Geo (required) ---
+    {"filename": "neogeo.zip", "system": "Neo Geo", "md5": "", "required": True, "subdir": "", "extra_copies": ["Roms/NEOGEO/neogeo.zip"], "notes": "Neo Geo BIOS (also needed in Roms/NEOGEO/)"},
+    # --- Sega CD (required) ---
+    {"filename": "bios_CD_U.bin", "system": "Sega CD", "md5": "2efd74e3232ff260e371b99f84024f7f", "required": True, "subdir": "", "extra_copies": [], "notes": "Sega CD BIOS (North America)"},
+    {"filename": "bios_CD_E.bin", "system": "Sega CD", "md5": "e66fa1dc5820d254611fdcdba0662372", "required": True, "subdir": "", "extra_copies": [], "notes": "Sega CD BIOS (Europe)"},
+    {"filename": "bios_CD_J.bin", "system": "Sega CD", "md5": "278a9397d192149e84e820ac621a8edd", "required": True, "subdir": "", "extra_copies": [], "notes": "Sega CD BIOS (Japan)"},
+    # --- TurboGrafx-CD (required) ---
+    {"filename": "syscard3.pce", "system": "TurboGrafx-CD", "md5": "38179df8f4ac870017db21ebcbf53114", "required": True, "subdir": "", "extra_copies": [], "notes": "TurboGrafx-CD / PC Engine CD System Card 3"},
+    # --- FDS (optional) ---
+    {"filename": "disksys.rom", "system": "FDS", "md5": "", "required": False, "subdir": "", "extra_copies": [], "notes": "Famicom Disk System BIOS"},
+    # --- Atari 5200 (optional) ---
+    {"filename": "5200.rom", "system": "Atari 5200", "md5": "", "required": False, "subdir": "", "extra_copies": [], "notes": "Atari 5200 BIOS"},
+    # --- Atari Lynx (optional) ---
+    {"filename": "lynxboot.img", "system": "Atari Lynx", "md5": "", "required": False, "subdir": "", "extra_copies": [], "notes": "Atari Lynx boot ROM"},
+    # --- Pokemon Mini (optional) ---
+    {"filename": "bios.min", "system": "Pokemon Mini", "md5": "", "required": False, "subdir": "", "extra_copies": [], "notes": "Pokemon Mini BIOS"},
+    # --- GBA (optional) ---
+    {"filename": "gba_bios.bin", "system": "GBA", "md5": "a860e8c0b6d573d191e4ec7db1b1e4f6", "required": False, "subdir": "", "extra_copies": [], "notes": "Game Boy Advance BIOS (optional, HLE available)"},
+    # --- GB / GBC (optional) ---
+    {"filename": "gb_bios.bin", "system": "GB", "md5": "32fbbd84168d3482956eb3c5051637f5", "required": False, "subdir": "", "extra_copies": [], "notes": "Game Boy BIOS (optional)"},
+    {"filename": "gbc_bios.bin", "system": "GBC", "md5": "dbfce9db9deaa2567f6a84fde55f9680", "required": False, "subdir": "", "extra_copies": [], "notes": "Game Boy Color BIOS (optional)"},
+]
+
 # ---------------------------------------------------------------------------
 # OS Profile definitions
 # ---------------------------------------------------------------------------
@@ -192,7 +251,7 @@ OS_PROFILES = {
         "install_method": "zip_extract",
         "releases_url": "https://api.github.com/repos/OnionUI/Onion/releases",
         "project_url": "https://github.com/OnionUI/Onion",
-        "wiki_url": "https://github.com/OnionUI/Onion/wiki",
+        "wiki_url": "https://onionui.github.io/docs",
         "sd_label": "ONION",
         "expected_dirs": [".tmp_update", "BIOS", "RetroArch", "miyoo", "Themes"],
         "detect_markers": [".tmp_update"],
@@ -368,7 +427,7 @@ OS_PROFILES = {
         "install_method": "raw_image",
         "releases_url": "https://api.github.com/repos/christianhaitian/dArkOS/releases",
         "project_url": "https://github.com/christianhaitian/dArkOS",
-        "wiki_url": "https://github.com/christianhaitian/arkos/wiki",
+        "wiki_url": "https://github.com/christianhaitian/dArkOS/wiki",
         "sd_label": "",
         "expected_dirs": [],
         "detect_markers": [],
@@ -377,6 +436,101 @@ OS_PROFILES = {
         "bios_partition_label": "EASYROMS",
         "bios_files": DARKOS_BIOS_FILES,
         "asset_filter": r"\.img\.7z\.001$",
+        "cluster_sectors": lambda size_bytes: "64",
+    },
+    "rocknix": {
+        "name": "ROCKNIX",
+        "device": "Anbernic, Powkiddy, AYANEO, Ayn, Retroid, etc.",
+        "description": (
+            "\u201cROCKNIX is an immutable Linux distribution for handheld "
+            "gaming devices, built on Buildroot with EmulationStation as "
+            "its frontend. It provides integrated RetroArch emulation, "
+            "network play, RetroAchievements, cloud sync, and custom "
+            "performance profiles.\u201d"
+        ),
+        "description_source": "https://github.com/ROCKNIX/distribution",
+        "compatible_devices": [
+            "Anbernic RG351P / RG351M / RG351V",
+            "Anbernic RG353P / RG353M / RG353V / RG353VS",
+            "Anbernic RG503 / RG552",
+            "Anbernic RG ARC D / RG ARC S",
+            "Anbernic RG35XX Plus / H / SP / 2024",
+            "Anbernic RG28XX",
+            "Anbernic RG40XX V / H",
+            "Anbernic RG CubeXX",
+            "Anbernic RG34XX / RG34XX SP",
+            "AYANEO Pocket ACE / DMG / EVO / S2",
+            "Ayn Odin 2 / Odin 2 Mini / Odin 2 Portal",
+            "GameForce Ace",
+            "Hardkernel ODROID Go Advance / Go Super / Go Ultra",
+            "MagicX XU Mini M",
+            "Powkiddy RGB10 / RGB10 Max 3 Pro / RGB10X",
+            "Powkiddy RK2023 / RGB20SX / RGB20 Pro / RGB30",
+            "Powkiddy X35S / X35H / X55 / XU10",
+            "Retroid Pocket 5 / Pocket Mini / Pocket Flip 2",
+            "R33S / R35S / R36S / K36",
+        ],
+        "install_notes": (
+            "ROCKNIX uses raw disk images flashed directly to the SD card "
+            "(similar to Raspberry Pi OS). This erases ALL existing data on "
+            "the card. Each device has its own image \u2014 select the correct "
+            "one for your handheld. Use Rufus, balenaEtcher, Raspberry Pi "
+            "Imager, or dd to flash the image.\n\n"
+            "First boot runs an install/expansion process and reboots into "
+            "EmulationStation. Do not interrupt this process. After setup, "
+            "BIOS files can be installed to the STORAGE partition under "
+            "roms/bios/ using the BIOS Manager tab."
+        ),
+        "install_method": "raw_image",
+        "releases_url": "https://api.github.com/repos/ROCKNIX/distribution/releases",
+        "project_url": "https://github.com/ROCKNIX/distribution",
+        "wiki_url": "https://rocknix.org/",
+        "sd_label": "",
+        "expected_dirs": [],
+        "detect_markers": [],
+        "version_paths": [],
+        "bios_dir": "roms/bios",
+        "bios_partition_label": "STORAGE",
+        "bios_files": ROCKNIX_BIOS_FILES,
+        "asset_filter": r"\.img\.gz$",
+        "cluster_sectors": lambda size_bytes: "64",
+    },
+    "koriki": {
+        "name": "Koriki",
+        "device": "Miyoo Mini",
+        "description": (
+            "\u201cKoriki is a software compilation for the microSD card slot "
+            "of Miyoo Mini retro console. It runs over stock firmware and "
+            "brings mainly the SimpleMenu frontend to this device.\u201d"
+        ),
+        "description_source": "https://github.com/Rparadise-Team/Koriki",
+        "compatible_devices": [
+            "Miyoo Mini v1",
+            "Miyoo Mini v2",
+            "Miyoo Mini v3",
+            "Miyoo Mini v4",
+            "Miyoo Mini+",
+            "Miyoo Mini Flip",
+        ],
+        "install_notes": (
+            "Extract the full release zip to a FAT32 formatted SD card. "
+            "Koriki runs on top of the Miyoo Mini stock firmware and uses "
+            "SimpleMenu as its frontend. "
+            "Recommended SD card size: 16 GB or larger. "
+            "After installation, add your ROMs to the Roms folder "
+            "and BIOS files to the BIOS folder."
+        ),
+        "install_method": "zip_extract",
+        "releases_url": "https://api.github.com/repos/Rparadise-Team/Koriki/releases",
+        "project_url": "https://github.com/Rparadise-Team/Koriki",
+        "wiki_url": "https://github.com/Rparadise-Team/Koriki#readme",
+        "sd_label": "",
+        "expected_dirs": ["Koriki", ".simplemenu", "BIOS", "RetroArch", "Roms", "Saves"],
+        "detect_markers": ["Koriki", ".simplemenu"],
+        "version_paths": ["Koriki/version.txt"],
+        "bios_dir": "BIOS",
+        "bios_files": KORIKI_BIOS_FILES,
+        "asset_filter": r"_full\.zip$",
         "cluster_sectors": lambda size_bytes: "64",
     },
 }

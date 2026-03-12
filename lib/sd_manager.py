@@ -1,17 +1,34 @@
 """
-sd_manager.py - SD card operations for CrossMix OS installer.
+sd_manager.py - SD card operations for OS installer.
 
 Manages SD card detection, mounting, formatting, and validation
-for the TrimUI Smart Pro using native Linux tools.
+for supported retro handheld devices using native Linux tools.
 """
 
 import json
 import logging
 import os
+import re
+import shlex
 import shutil
 import subprocess
 
 logger = logging.getLogger(__name__)
+
+_SAFE_DEVICE_RE = re.compile(r"^/dev/[a-zA-Z0-9_]+$")
+_SAFE_LABEL_RE = re.compile(r"^[A-Z0-9_ ]{0,11}$")
+
+
+def _validate_device(device: str) -> None:
+    """Raise ValueError if device path looks unsafe for shell interpolation."""
+    if not _SAFE_DEVICE_RE.match(device):
+        raise ValueError(f"Invalid device path: {device!r}")
+
+
+def _validate_label(label: str) -> None:
+    """Raise ValueError if label contains shell-unsafe characters."""
+    if not _SAFE_LABEL_RE.match(label):
+        raise ValueError(f"Invalid volume label: {label!r}")
 
 _TOOL_PATHS = {
     "parted": "/sbin/parted",
@@ -158,8 +175,12 @@ def get_drive_partitions(device: str) -> list[dict]:
 def detect_sd_state(mount_point: str) -> str:
     """Determine what is currently on the SD card.
 
-    Returns "onion", "crossmix", "stock", "empty", or "unknown".
+    Checks detect_markers from all OS profiles, then falls back to
+    stock/empty/unknown. Returns a profile key (e.g. "onion", "crossmix",
+    "minui", "koriki") or "stock", "empty", "unknown".
     """
+    from lib.os_profiles import OS_PROFILES
+
     if not os.path.isdir(mount_point):
         return "unknown"
 
@@ -177,13 +198,15 @@ def detect_sd_state(mount_point: str) -> str:
     if not meaningful:
         return "empty"
 
-    if ".tmp_update" in entries:
-        return "onion"
+    entries_set = set(entries)
 
-    if "System" in entries and "Emus" in entries:
-        return "crossmix"
+    # Check each profile's detect_markers (most specific first)
+    for key, profile in OS_PROFILES.items():
+        markers = profile.get("detect_markers", [])
+        if markers and all(m in entries_set for m in markers):
+            return key
 
-    if "miyoo" in entries:
+    if "miyoo" in entries_set:
         return "stock"
 
     return "unknown"
@@ -221,7 +244,9 @@ def format_sd_card(device: str, label: str = "SDCARD",
         Defaults to "64" if not provided.
     """
     device = _ensure_block_device(device)
-    label = label[:11].upper()
+    _validate_device(device)
+    label = (label or "SDCARD")[:11].upper()
+    _validate_label(label)
 
     partition_device = _partition_device_for(device)
 
@@ -275,17 +300,16 @@ udevadm settle --timeout=5
     return True, f"Successfully formatted {device} as FAT32 (label={label})"
 
 
-def check_disk(device: str) -> str:
-    """Run a non-destructive filesystem check on the first partition."""
-    device = _ensure_block_device(device)
-    partition_device = _partition_device_for(device)
+def check_disk(partition: str) -> str:
+    """Run a non-destructive filesystem check on a partition."""
+    partition = _ensure_block_device(partition)
 
-    partitions = get_drive_partitions(device)
-    for part in partitions:
-        if part.get("mountpoint") and part["device"] == partition_device:
-            _run(["udisksctl", "unmount", "-b", partition_device])
+    # Unmount if currently mounted
+    info = _run(["lsblk", "-n", "-o", "MOUNTPOINT", partition])
+    if info.stdout.strip():
+        _run(["udisksctl", "unmount", "-b", partition])
 
-    res = _privileged_run([_tool("fsck.vfat"), "-n", partition_device], timeout=300)
+    res = _privileged_run([_tool("fsck.vfat"), "-n", partition], timeout=300)
     output = (res.stdout + "\n" + res.stderr).strip()
     return output
 
@@ -387,6 +411,10 @@ def write_image_to_device(
     Returns (success, message).
     """
     device = _ensure_block_device(device)
+    _validate_device(device)
+
+    if not os.path.isfile(img_path):
+        return False, f"Image file not found: {img_path}"
 
     import tempfile
     script = f"""#!/bin/sh
@@ -398,7 +426,7 @@ for p in {device}*; do
 done
 
 # Write image
-dd if={img_path} of={device} bs=4M conv=fsync status=progress 2>&1
+dd if={shlex.quote(img_path)} of={device} bs=4M conv=fsync status=progress 2>&1
 
 sync
 """

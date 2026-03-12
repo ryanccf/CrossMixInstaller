@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-OS Installer - Install Onion OS or CrossMix OS to SD cards.
-Supports Miyoo Mini/Mini+ (Onion OS) and TrimUI Smart Pro (CrossMix OS).
+OS Installer - Install retro handheld OS images to SD cards.
+Supports multiple OSes and devices via pluggable profiles.
 """
 
 import gi
