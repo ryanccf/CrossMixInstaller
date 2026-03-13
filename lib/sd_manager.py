@@ -1,8 +1,8 @@
 """
 sd_manager.py - SD card operations for OS installer.
 
-Manages SD card detection, mounting, formatting, and validation
-for supported retro handheld devices using native Linux tools.
+Manages SD card detection, mounting, formatting, and validation.
+Uses native Linux tools on Linux and PowerShell/diskpart on Windows.
 """
 
 import json
@@ -18,14 +18,9 @@ logger = logging.getLogger(__name__)
 
 IS_WINDOWS = platform.system() == "Windows"
 
-
-def _require_linux(operation: str = "This operation"):
-    """Raise OSError if running on Windows."""
-    if IS_WINDOWS:
-        raise OSError(
-            f"{operation} requires Linux.\n"
-            f"On Windows, use a tool like Rufus or balenaEtcher for SD card operations."
-        )
+# Import Windows backend when on Windows
+if IS_WINDOWS:
+    from lib import sd_manager_win as _win
 
 _SAFE_DEVICE_RE = re.compile(r"^/dev/[a-zA-Z0-9_]+$")
 _SAFE_LABEL_RE = re.compile(r"^[A-Z0-9_ ]{0,11}$")
@@ -106,8 +101,7 @@ def _card_size_bytes(device: str) -> int:
 def list_removable_drives() -> list[dict]:
     """Enumerate removable drives visible to the system."""
     if IS_WINDOWS:
-        logger.info("SD card detection is not supported on Windows")
-        return []
+        return _win.list_removable_drives()
 
     result = _run([
         "lsblk", "-J", "-o",
@@ -159,7 +153,7 @@ def list_removable_drives() -> list[dict]:
 def get_drive_partitions(device: str) -> list[dict]:
     """Return a list of partitions for a device."""
     if IS_WINDOWS:
-        return []
+        return _win.get_drive_partitions(device)
     device = _ensure_block_device(device)
 
     result = _run([
@@ -263,7 +257,8 @@ def format_sd_card(device: str, label: str = "SDCARD",
         Function that takes size_bytes and returns cluster sectors string.
         Defaults to "64" if not provided.
     """
-    _require_linux("Formatting SD cards")
+    if IS_WINDOWS:
+        return _win.format_sd_card(device, label, cluster_sectors_fn)
     device = _ensure_block_device(device)
     _validate_device(device)
     label = (label or "SDCARD")[:11].upper()
@@ -323,7 +318,8 @@ udevadm settle --timeout=5
 
 def check_disk(partition: str) -> str:
     """Run a non-destructive filesystem check on a partition."""
-    _require_linux("Disk checking")
+    if IS_WINDOWS:
+        return _win.check_disk(partition)
     partition = _ensure_block_device(partition)
 
     # Unmount if currently mounted
@@ -338,7 +334,8 @@ def check_disk(partition: str) -> str:
 
 def eject_drive(device: str) -> tuple[bool, str]:
     """Safely eject a device (unmount + power-off)."""
-    _require_linux("Ejecting drives")
+    if IS_WINDOWS:
+        return _win.eject_drive(device)
     device = _ensure_block_device(device)
 
     partitions = get_drive_partitions(device)
@@ -364,8 +361,9 @@ def eject_drive(device: str) -> tuple[bool, str]:
 
 
 def mount_partition(partition: str) -> str | None:
-    """Mount a partition via udisksctl and return the mount point."""
-    _require_linux("Mounting partitions")
+    """Mount a partition and return the mount point."""
+    if IS_WINDOWS:
+        return _win.mount_partition(partition)
     partition = _ensure_block_device(partition)
 
     res = _run(["udisksctl", "mount", "-b", partition])
@@ -385,7 +383,8 @@ def mount_partition(partition: str) -> str | None:
 
 def unmount_partition(partition: str) -> tuple[bool, str]:
     """Unmount a partition."""
-    _require_linux("Unmounting partitions")
+    if IS_WINDOWS:
+        return _win.unmount_partition(partition)
     partition = _ensure_block_device(partition)
 
     res = _run(["udisksctl", "unmount", "-b", partition])
@@ -410,7 +409,8 @@ def get_free_space(path: str) -> int:
 
 def unmount_all_partitions(device: str) -> tuple[bool, str]:
     """Unmount all mounted partitions on a device."""
-    _require_linux("Unmounting partitions")
+    if IS_WINDOWS:
+        return _win.unmount_all_partitions(device)
     device = _ensure_block_device(device)
     partitions = get_drive_partitions(_device_basename(device))
     failed = []
@@ -436,7 +436,8 @@ def write_image_to_device(
     Unmounts all partitions first, then writes with dd via pkexec.
     Returns (success, message).
     """
-    _require_linux("Writing disk images")
+    if IS_WINDOWS:
+        return _win.write_image_to_device(img_path, device, timeout)
     device = _ensure_block_device(device)
     _validate_device(device)
 
